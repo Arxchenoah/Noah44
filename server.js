@@ -183,6 +183,58 @@ function generateShiftPlan(submissions) {
   };
 }
 
+// ─── Validation helpers ───────────────────────────────────────────────────────
+
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function validateTimeString(t) {
+  return typeof t === 'string' && TIME_RE.test(t);
+}
+
+function validateAvailability(availability) {
+  const VALID_DAYS = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+  for (const day of VALID_DAYS) {
+    const a = availability[day];
+    if (!a) continue;
+    if (a.available) {
+      if (!validateTimeString(a.from)) return `Ungültige Von-Zeit für ${day}`;
+      if (!validateTimeString(a.to))   return `Ungültige Bis-Zeit für ${day}`;
+      if (timeToMinutes(a.from) >= timeToMinutes(a.to))
+        return `Beginn muss vor Ende liegen (${day})`;
+    }
+  }
+  return null;
+}
+
+// ─── Rate limiter for login ───────────────────────────────────────────────────
+
+const loginAttempts = new Map(); // ip → { count, lockedUntil }
+
+function checkLoginRateLimit(ip) {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip) || { count: 0, lockedUntil: 0 };
+  if (entry.lockedUntil > now) {
+    const secs = Math.ceil((entry.lockedUntil - now) / 1000);
+    return `Zu viele Fehlversuche. Bitte ${secs}s warten.`;
+  }
+  return null;
+}
+
+function recordLoginFailure(ip) {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip) || { count: 0, lockedUntil: 0 };
+  entry.count += 1;
+  if (entry.count >= 5) {
+    entry.lockedUntil = now + 15 * 60 * 1000; // 15-min lockout
+    entry.count = 0;
+  }
+  loginAttempts.set(ip, entry);
+}
+
+function clearLoginFailures(ip) {
+  loginAttempts.delete(ip);
+}
+
 // ─── Public API Routes ────────────────────────────────────────────────────────
 
 // GET /api/status – submission progress
@@ -195,7 +247,7 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// POST /api/submit – employee submits availability
+// POST /api/submit – employee submits (or updates) availability
 app.post('/api/submit', (req, res) => {
   const { name, employmentType, desiredHoursPerWeek, availability } = req.body;
 
@@ -207,18 +259,37 @@ app.post('/api/submit', (req, res) => {
     return res.status(400).json({ error: 'Verfügbarkeit fehlt' });
   }
 
+  const availError = validateAvailability(availability);
+  if (availError) return res.status(400).json({ error: availError });
+
+  if (employmentType === 'Minijobler') {
+    const hours = parseInt(desiredHoursPerWeek);
+    if (isNaN(hours) || hours < 1 || hours > 40) {
+      return res.status(400).json({ error: 'Gewünschte Stunden müssen zwischen 1 und 40 liegen' });
+    }
+  }
+
   const data = readSubmissions();
 
-  // Check for duplicate name
-  const duplicate = data.submissions.find(
+  // If name already exists → UPDATE the existing entry
+  const existingIdx = data.submissions.findIndex(
     s => s.name.toLowerCase().trim() === name.toLowerCase().trim()
   );
-  if (duplicate) {
-    return res.status(400).json({ error: `"${name}" hat bereits eine Einreichung abgegeben. Bitte Admin kontaktieren, falls eine Korrektur nötig ist.` });
+
+  if (existingIdx >= 0) {
+    data.submissions[existingIdx] = {
+      ...data.submissions[existingIdx],
+      updatedAt: new Date().toISOString(),
+      employmentType,
+      desiredHoursPerWeek: employmentType === 'Minijobler' ? parseInt(desiredHoursPerWeek) : null,
+      availability
+    };
+    writeSubmissions(data);
+    return res.json({ success: true, updated: true, count: data.submissions.length, total: EMPLOYEE_COUNT });
   }
 
   if (data.submissions.length >= EMPLOYEE_COUNT) {
-    return res.status(400).json({ error: 'Alle Plätze sind bereits belegt. Der Dienstplan wurde bereits erstellt.' });
+    return res.status(400).json({ error: 'Alle Plätze sind bereits belegt.' });
   }
 
   const submission = {
@@ -226,7 +297,7 @@ app.post('/api/submit', (req, res) => {
     submittedAt: new Date().toISOString(),
     name: name.trim(),
     employmentType,
-    desiredHoursPerWeek: employmentType === 'Minijobler' ? (parseInt(desiredHoursPerWeek) || 10) : null,
+    desiredHoursPerWeek: employmentType === 'Minijobler' ? parseInt(desiredHoursPerWeek) : null,
     availability
   };
 
@@ -243,7 +314,7 @@ app.post('/api/submit', (req, res) => {
     }
   }
 
-  res.json({ success: true, count: data.submissions.length, total: EMPLOYEE_COUNT });
+  res.json({ success: true, updated: false, count: data.submissions.length, total: EMPLOYEE_COUNT });
 });
 
 // ─── Admin API Routes ─────────────────────────────────────────────────────────
@@ -253,14 +324,22 @@ app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error: 'Passwort erforderlich' });
 
+  const ip = req.ip || 'unknown';
+  const rateLimitError = checkLoginRateLimit(ip);
+  if (rateLimitError) return res.status(429).json({ error: rateLimitError });
+
   // Timing-safe comparison
   const inputBuf = Buffer.from(password);
   const expectedBuf = Buffer.from(ADMIN_PASSWORD);
   const match = inputBuf.length === expectedBuf.length &&
     crypto.timingSafeEqual(inputBuf, expectedBuf);
 
-  if (!match) return res.status(401).json({ error: 'Falsches Passwort' });
+  if (!match) {
+    recordLoginFailure(ip);
+    return res.status(401).json({ error: 'Falsches Passwort' });
+  }
 
+  clearLoginFailures(ip);
   req.session.isAdmin = true;
   res.json({ success: true });
 });
@@ -307,11 +386,69 @@ app.delete('/api/admin/submissions/:id', requireAdmin, (req, res) => {
   res.json({ success: true, count: data.submissions.length });
 });
 
+// PUT /api/admin/submissions/:id – admin edits a submission
+app.put('/api/admin/submissions/:id', requireAdmin, (req, res) => {
+  const { employmentType, desiredHoursPerWeek, availability } = req.body;
+
+  if (employmentType && !['Vollzeit', 'Teilzeit', 'Minijobler'].includes(employmentType)) {
+    return res.status(400).json({ error: 'Ungültiger Beschäftigungstyp' });
+  }
+  if (availability) {
+    const availError = validateAvailability(availability);
+    if (availError) return res.status(400).json({ error: availError });
+  }
+  if (employmentType === 'Minijobler' && desiredHoursPerWeek !== undefined) {
+    const hours = parseInt(desiredHoursPerWeek);
+    if (isNaN(hours) || hours < 1 || hours > 40) {
+      return res.status(400).json({ error: 'Gewünschte Stunden müssen zwischen 1 und 40 liegen' });
+    }
+  }
+
+  const data = readSubmissions();
+  const idx = data.submissions.findIndex(s => s.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'Einreichung nicht gefunden' });
+
+  const updated = { ...data.submissions[idx], updatedAt: new Date().toISOString() };
+  if (employmentType)  updated.employmentType = employmentType;
+  if (desiredHoursPerWeek !== undefined) {
+    updated.desiredHoursPerWeek = updated.employmentType === 'Minijobler'
+      ? parseInt(desiredHoursPerWeek) : null;
+  }
+  if (availability)    updated.availability = availability;
+
+  data.submissions[idx] = updated;
+  writeSubmissions(data);
+  res.json({ success: true, submission: updated });
+});
+
 // POST /api/admin/reset
 app.post('/api/admin/reset', requireAdmin, (req, res) => {
   writeSubmissions({ submissions: [] });
   writeShiftPlan({});
   res.json({ success: true });
+});
+
+// GET /api/admin/shift-plan/export/csv
+app.get('/api/admin/shift-plan/export/csv', requireAdmin, (req, res) => {
+  const plan = readShiftPlan();
+  if (!plan.generatedAt) return res.status(404).json({ error: 'Noch kein Dienstplan generiert' });
+
+  const DAYS = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+  const rows = [['Tag','Von','Bis','Mitarbeiter','Beschäftigungsart']];
+
+  for (const day of DAYS) {
+    const entries = plan.plan[day] || [];
+    if (entries.length === 0) {
+      rows.push([day,'','','(niemand)','']);
+    } else {
+      entries.forEach(e => rows.push([day, e.from, e.to, e.name, e.employmentType || '']));
+    }
+  }
+
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="dienstplan.csv"');
+  res.send('\uFEFF' + csv); // BOM for Excel compatibility
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────

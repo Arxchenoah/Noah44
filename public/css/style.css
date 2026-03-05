@@ -343,3 +343,19 @@ input:disabled, select:disabled {
   .avail-table .day-label { min-width: 80px; }
   .avail-table input[type="time"] { width: 85px; }
 }
+
+/* ── Print ───────────────────────────────────────────────────────────────────── */
+@media print {
+  .header, #loginPanel, #exportCsvBtn, #printBtn,
+  #generateBtn, #refreshBtn, #resetBtn, .sort-btn,
+  button, .submission-item__meta button { display: none !important; }
+
+  body { background: white; font-size: 11pt; }
+  .card { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+  .container--wide { max-width: 100%; padding: 0; }
+  .calendar-table { font-size: 9pt; }
+  .calendar-table th, .calendar-table td { padding: .3rem .4rem; }
+  .shift-block { border-left-width: 3px; }
+  #loginPanel { display: none !important; }
+  #dashboardPanel { display: block !important; }
+}

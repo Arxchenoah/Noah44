@@ -73,8 +73,8 @@ function renderCalendar(container, planData) {
         // Highlight if this person covers the double-staffing window
         const isDoubleDay = DOUBLE_DAYS.has(day);
         const coversDouble = isDoubleDay &&
-          parseInt(entry.from) * 60 + parseInt((entry.from.split(':')[1] || 0)) <= 17 * 60 &&
-          parseInt(entry.to) * 60 + parseInt((entry.to.split(':')[1] || 0)) >= 20 * 60;
+          toMin(entry.from) <= 17 * 60 &&
+          toMin(entry.to)   >= 20 * 60;
 
         block.innerHTML = `
           <div class="shift-block__time">${entry.from} – ${entry.to} Uhr</div>
@@ -92,6 +92,11 @@ function renderCalendar(container, planData) {
   table.appendChild(tbody);
   container.innerHTML = '';
   container.appendChild(table);
+}
+
+function toMin(t) {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + (m || 0);
 }
 
 function escHtml(str) {

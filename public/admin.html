@@ -59,6 +59,12 @@
       <span id="submissionCount"
             style="font-size:.85rem; font-weight:400; color:var(--text-muted);"></span>
     </div>
+    <div style="display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:.75rem; font-size:.8rem;">
+      <span style="color:var(--text-muted); align-self:center;">Sortieren:</span>
+      <button class="btn btn--primary btn--sm sort-btn" data-sort="name" aria-label="Nach Name sortieren">A–Z Name</button>
+      <button class="btn btn--outline btn--sm sort-btn" data-sort="type" aria-label="Nach Typ sortieren">Beschäftigungsart</button>
+      <button class="btn btn--outline btn--sm sort-btn" data-sort="time" aria-label="Nach Zeit sortieren">Neueste zuerst</button>
+    </div>
     <div id="submissionsList">
       <p style="color:var(--text-muted); font-size:.875rem;">Noch keine Einreichungen.</p>
     </div>
@@ -73,6 +79,16 @@
 
     <!-- Conflicts -->
     <div id="conflictsBox" class="alert alert--warning hidden" style="margin-bottom:1rem;"></div>
+
+    <!-- Export / Print actions -->
+    <div style="display:flex; gap:.75rem; flex-wrap:wrap; margin-bottom:1rem;">
+      <button class="btn btn--outline btn--sm" id="exportCsvBtn" aria-label="Dienstplan als CSV herunterladen">
+        ⬇️ CSV exportieren
+      </button>
+      <button class="btn btn--outline btn--sm" id="printBtn" aria-label="Dienstplan drucken">
+        🖨️ Drucken
+      </button>
+    </div>
 
     <!-- Calendar -->
     <div class="calendar-wrap" id="calendarWrap"></div>

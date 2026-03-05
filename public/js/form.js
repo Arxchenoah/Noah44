@@ -163,8 +163,9 @@ async function handleSubmit(e) {
     document.getElementById('formCard').classList.add('hidden');
     const successCard = document.getElementById('successCard');
     successCard.classList.remove('hidden');
+    const updateNote = result.updated ? ' (Deine Angaben wurden aktualisiert.)' : '';
     document.getElementById('successText').textContent =
-      `${result.count} von ${result.total} Mitarbeitern haben jetzt eingereicht.` +
+      `${result.count} von ${result.total} Mitarbeitern haben jetzt eingereicht.${updateNote}` +
       (result.count >= result.total
         ? ' Der Dienstplan wird automatisch erstellt!'
         : ' Sobald alle eingetragen haben, wird der Dienstplan erstellt.');

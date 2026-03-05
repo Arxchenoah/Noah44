@@ -1,6 +1,7 @@
 'use strict';
 
 let pollInterval = null;
+let sortMode = 'name'; // 'name' | 'type' | 'time'
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -17,7 +18,19 @@ function typeBadge(type) {
   const cls = type === 'Vollzeit' ? 'vollzeit'
     : type === 'Teilzeit' ? 'teilzeit'
     : 'minijobler';
-  return `<span class="badge badge--${cls}">${type}</span>`;
+  return `<span class="badge badge--${cls}">${escHtml(type)}</span>`;
+}
+
+// Intercept 401 on any authenticated API call → go back to login
+function handle401() {
+  clearInterval(pollInterval);
+  pollInterval = null;
+  document.getElementById('dashboardPanel').classList.add('hidden');
+  document.getElementById('loginPanel').classList.remove('hidden');
+  document.getElementById('logoutBtn').classList.add('hidden');
+  const err = document.getElementById('loginError');
+  err.textContent = 'Sitzung abgelaufen. Bitte erneut anmelden.';
+  err.classList.remove('hidden');
 }
 
 // ── Login ────────────────────────────────────────────────────────────────────
@@ -47,6 +60,7 @@ async function handleLogin(e) {
       return;
     }
 
+    document.getElementById('adminPassword').value = '';
     showDashboard();
   } catch {
     errEl.textContent = 'Netzwerkfehler';
@@ -61,6 +75,7 @@ async function handleLogin(e) {
 async function handleLogout() {
   await fetch('/api/admin/logout', { method: 'POST' });
   clearInterval(pollInterval);
+  pollInterval = null;
   document.getElementById('dashboardPanel').classList.add('hidden');
   document.getElementById('loginPanel').classList.remove('hidden');
   document.getElementById('logoutBtn').classList.add('hidden');
@@ -71,11 +86,13 @@ async function handleLogout() {
 
 function showDashboard() {
   document.getElementById('loginPanel').classList.add('hidden');
+  document.getElementById('loginError').classList.add('hidden');
   document.getElementById('dashboardPanel').classList.remove('hidden');
   document.getElementById('logoutBtn').classList.remove('hidden');
   loadDashboard();
-  // Auto-poll every 30s
-  pollInterval = setInterval(loadDashboard, 30000);
+  if (!pollInterval) {
+    pollInterval = setInterval(loadDashboard, 30000);
+  }
 }
 
 // ── Load dashboard data ───────────────────────────────────────────────────────
@@ -87,7 +104,7 @@ async function loadDashboard() {
 async function loadSubmissions() {
   try {
     const res = await fetch('/api/admin/submissions');
-    if (res.status === 401) { handleLogout(); return; }
+    if (res.status === 401) { handle401(); return; }
     const data = await res.json();
     renderSubmissions(data);
     updateProgress(data.count, data.total);
@@ -99,8 +116,8 @@ async function loadSubmissions() {
 async function loadShiftPlan() {
   try {
     const res = await fetch('/api/admin/shift-plan');
-    if (res.status === 404) return; // not yet generated
-    if (res.status === 401) return;
+    if (res.status === 404) return;
+    if (res.status === 401) { handle401(); return; }
     const data = await res.json();
     renderShiftPlan(data);
   } catch (err) {
@@ -110,29 +127,50 @@ async function loadShiftPlan() {
 
 // ── Render submissions ────────────────────────────────────────────────────────
 
+let lastSubmissionsData = null;
+
+function sortSubmissions(subs) {
+  const copy = [...subs];
+  if (sortMode === 'name') copy.sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  else if (sortMode === 'type') copy.sort((a, b) => a.employmentType.localeCompare(b.employmentType, 'de'));
+  else copy.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  return copy;
+}
+
 function renderSubmissions(data) {
+  lastSubmissionsData = data;
   const list = document.getElementById('submissionsList');
   const countEl = document.getElementById('submissionCount');
   countEl.textContent = `(${data.count} / ${data.total})`;
+
+  // Update sort button states
+  document.querySelectorAll('.sort-btn').forEach(btn => {
+    btn.classList.toggle('btn--primary', btn.dataset.sort === sortMode);
+    btn.classList.toggle('btn--outline', btn.dataset.sort !== sortMode);
+  });
 
   if (!data.submissions || data.submissions.length === 0) {
     list.innerHTML = '<p style="color:var(--text-muted); font-size:.875rem;">Noch keine Einreichungen.</p>';
     return;
   }
 
-  list.innerHTML = data.submissions.map(s => `
+  const sorted = sortSubmissions(data.submissions);
+
+  list.innerHTML = sorted.map(s => `
     <div class="submission-item">
       <div class="submission-item__info">
         <div class="submission-item__name">${escHtml(s.name)}</div>
         <div class="submission-item__meta">
           ${typeBadge(s.employmentType)}
           ${s.desiredHoursPerWeek ? `&nbsp;• ${s.desiredHoursPerWeek}h/Woche` : ''}
-          &nbsp;• Eingereicht: ${formatDate(s.submittedAt)}
+          &nbsp;• ${s.updatedAt
+            ? 'Aktualisiert: ' + formatDate(s.updatedAt)
+            : 'Eingereicht: ' + formatDate(s.submittedAt)}
         </div>
       </div>
       <button class="btn btn--outline btn--sm"
-              onclick="deleteSubmission('${s.id}', '${escHtml(s.name)}')"
-              title="Einreichung löschen">✕</button>
+              onclick="deleteSubmission('${escHtml(s.id)}', '${escHtml(s.name)}')"
+              title="Einreichung löschen" aria-label="Einreichung von ${escHtml(s.name)} löschen">✕</button>
     </div>
   `).join('');
 }
@@ -145,6 +183,8 @@ function updateProgress(count, total) {
   const genBtn = document.getElementById('generateBtn');
   if (count >= total) {
     genBtn.textContent = '⚡ Dienstplan generieren (alle eingereicht)';
+  } else {
+    genBtn.textContent = '⚡ Dienstplan generieren';
   }
 }
 
@@ -161,7 +201,7 @@ function renderShiftPlan(data) {
   const conflictsBox = document.getElementById('conflictsBox');
   if (data.conflicts && data.conflicts.length > 0) {
     conflictsBox.classList.remove('hidden');
-    conflictsBox.innerHTML = `<strong>⚠️ Hinweise / Konflikte:</strong><ul style="margin-top:.5rem; padding-left:1.25rem;">` +
+    conflictsBox.innerHTML = '<strong>⚠️ Hinweise / Konflikte:</strong><ul style="margin-top:.5rem; padding-left:1.25rem;">' +
       data.conflicts.map(c => `<li>${escHtml(c)}</li>`).join('') +
       '</ul>';
   } else {
@@ -197,13 +237,14 @@ async function deleteSubmission(id, name) {
   if (!confirm(`Einreichung von "${name}" wirklich löschen?`)) return;
   try {
     const res = await fetch(`/api/admin/submissions/${id}`, { method: 'DELETE' });
+    if (res.status === 401) { handle401(); return; }
     if (!res.ok) {
       const d = await res.json();
       alert(d.error || 'Löschen fehlgeschlagen');
       return;
     }
     loadSubmissions();
-  } catch (err) {
+  } catch {
     alert('Netzwerkfehler');
   }
 }
@@ -216,18 +257,30 @@ async function handleGenerate() {
   btn.textContent = '⏳ Wird generiert…';
   try {
     const res = await fetch('/api/admin/generate', { method: 'POST' });
+    if (res.status === 401) { handle401(); return; }
     const data = await res.json();
     if (!res.ok) {
       alert(data.error || 'Generierung fehlgeschlagen');
       return;
     }
     renderShiftPlan(data);
-  } catch (err) {
+  } catch {
     alert('Netzwerkfehler');
   } finally {
     btn.disabled = false;
-    btn.textContent = '⚡ Dienstplan generieren';
   }
+}
+
+// ── CSV Export ────────────────────────────────────────────────────────────────
+
+function handleExportCsv() {
+  window.location.href = '/api/admin/shift-plan/export/csv';
+}
+
+// ── Print ─────────────────────────────────────────────────────────────────────
+
+function handlePrint() {
+  window.print();
 }
 
 // ── Reset ─────────────────────────────────────────────────────────────────────
@@ -236,6 +289,7 @@ async function handleReset() {
   if (!confirm('Wirklich ALLE Einreichungen und den Dienstplan löschen? Diese Aktion kann nicht rückgängig gemacht werden.')) return;
   try {
     const res = await fetch('/api/admin/reset', { method: 'POST' });
+    if (res.status === 401) { handle401(); return; }
     if (!res.ok) { alert('Zurücksetzen fehlgeschlagen'); return; }
     document.getElementById('shiftPlanCard').classList.add('hidden');
     loadDashboard();
@@ -262,6 +316,16 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('generateBtn').addEventListener('click', handleGenerate);
   document.getElementById('refreshBtn').addEventListener('click', loadDashboard);
   document.getElementById('resetBtn').addEventListener('click', handleReset);
+  document.getElementById('exportCsvBtn').addEventListener('click', handleExportCsv);
+  document.getElementById('printBtn').addEventListener('click', handlePrint);
+
+  // Sort buttons
+  document.querySelectorAll('.sort-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      sortMode = btn.dataset.sort;
+      if (lastSubmissionsData) renderSubmissions(lastSubmissionsData);
+    });
+  });
 
   // Check if already logged in (session still valid)
   fetch('/api/admin/submissions')
