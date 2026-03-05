@@ -77,167 +77,96 @@ function minutesToTime(m) {
   return `${h}:${min}`;
 }
 
-function buildSlotsForDay(day) {
-  const isWeekend = WEEKEND_DAYS.has(day);
-  const isDouble = DOUBLE_STAFF_DAYS.has(day);
-
-  // Coverage: weekday 06:00-23:00, weekend 07:00-22:00
-  const slots = [];
-
-  if (isWeekend) {
-    // Früh: 07:00–15:00, Mittel: 11:00–19:00, Spät: 14:00–22:00
-    slots.push({ label: 'Frühschicht',  from: '07:00', to: '15:00' });
-    slots.push({ label: 'Mittelschicht', from: '11:00', to: '19:00' });
-    slots.push({ label: 'Spätschicht',  from: '14:00', to: '22:00' });
-  } else {
-    // Früh: 06:00–14:00, Mittel: 11:00–19:00, Spät: 15:00–23:00
-    slots.push({ label: 'Frühschicht',  from: '06:00', to: '14:00' });
-    slots.push({ label: 'Mittelschicht', from: '11:00', to: '19:00' });
-    slots.push({ label: 'Spätschicht',  from: '15:00', to: '23:00' });
-    if (isDouble) {
-      // Extra slot to ensure double-coverage 17:00–20:00
-      slots.push({ label: 'Doppelbesetzung (17–20 Uhr)', from: '17:00', to: '20:00', doubleRequired: true });
-    }
+// Returns list of uncovered 30-min slots in [coverStart, coverEnd)
+function findCoverageGaps(assignments, coverStart, coverEnd) {
+  const gaps = [];
+  for (let t = coverStart; t < coverEnd; t += 30) {
+    const covered = assignments.some(a => {
+      const f = timeToMinutes(a.from);
+      const e = timeToMinutes(a.to);
+      return f <= t && e > t;
+    });
+    if (!covered) gaps.push(minutesToTime(t));
   }
-
-  return slots;
-}
-
-function employeeCanCoverSlot(employee, day, slot) {
-  const avail = employee.availability[day];
-  if (!avail || !avail.available) return false;
-
-  const availFrom = timeToMinutes(avail.from);
-  const availTo = timeToMinutes(avail.to);
-  const slotFrom = timeToMinutes(slot.from);
-  const slotTo = timeToMinutes(slot.to);
-
-  return availFrom <= slotFrom && availTo >= slotTo;
-}
-
-function getShiftDuration(slot) {
-  return (timeToMinutes(slot.to) - timeToMinutes(slot.from)) / 60;
+  return gaps;
 }
 
 function generateShiftPlan(submissions) {
   const conflicts = [];
   const plan = {};
 
-  // Employee state tracking
   const employees = submissions.map(s => ({
     ...s,
     assignedHours: 0,
-    assignedDays: new Set(),
     weeklyTarget: s.employmentType === 'Vollzeit' ? 40
                 : s.employmentType === 'Teilzeit' ? 25
                 : (s.desiredHoursPerWeek || 10),
     maxHours: s.employmentType === 'Minijobler'
       ? (s.desiredHoursPerWeek || 10)
-      : (s.employmentType === 'Vollzeit' ? 48 : 35),
-    strictHours: s.employmentType === 'Minijobler'
+      : 99 // no hard cap for Vollzeit/Teilzeit
   }));
 
-  // Process double-staff days first
-  const orderedDays = [
-    ...DAYS.filter(d => DOUBLE_STAFF_DAYS.has(d)),
-    ...DAYS.filter(d => !DOUBLE_STAFF_DAYS.has(d))
-  ];
-
-  for (const day of orderedDays) {
+  for (const day of DAYS) {
     plan[day] = [];
-    const slots = buildSlotsForDay(day);
-    const assignedToday = new Set(); // employee IDs assigned today
+    const isWeekend = WEEKEND_DAYS.has(day);
+    const coverStart = isWeekend ? 7 * 60 : 6 * 60;
+    const coverEnd   = isWeekend ? 22 * 60 : 23 * 60;
 
-    for (const slot of slots) {
-      const duration = getShiftDuration(slot);
+    for (const emp of employees) {
+      const avail = emp.availability[day];
+      if (!avail || !avail.available) continue;
 
-      // Find eligible employees
-      const candidates = employees
-        .filter(e => {
-          if (assignedToday.has(e.id) && !slot.doubleRequired) return false;
-          if (!employeeCanCoverSlot(e, day, slot)) return false;
-          if (e.assignedHours + duration > e.maxHours) return false;
-          return true;
-        })
-        .sort((a, b) => {
-          // Prefer Minijobler for short slots, balance hours otherwise
-          if (slot.doubleRequired) {
-            // For double-staffing slot: prefer someone already assigned today
-            const aToday = assignedToday.has(a.id) ? 0 : 1;
-            const bToday = assignedToday.has(b.id) ? 0 : 1;
-            if (aToday !== bToday) return aToday - bToday;
-          }
-          // Prefer Minijobler (their hours are hard-constrained, assign them first)
-          const aIsMini = a.employmentType === 'Minijobler' ? 0 : 1;
-          const bIsMini = b.employmentType === 'Minijobler' ? 0 : 1;
-          if (aIsMini !== bIsMini) return aIsMini - bIsMini;
-          // Balance: fewer assigned hours = higher priority
-          return a.assignedHours - b.assignedHours;
-        });
+      const duration = (timeToMinutes(avail.to) - timeToMinutes(avail.from)) / 60;
+      if (duration <= 0) continue;
 
-      if (candidates.length === 0) {
-        plan[day].push({
-          label: slot.label,
-          from: slot.from,
-          to: slot.to,
-          name: 'UNBESETZT',
-          employmentType: null,
-          unassigned: true,
-          doubleRequired: slot.doubleRequired || false
-        });
-        conflicts.push(`Kein Mitarbeiter verfügbar: ${day} ${slot.from}–${slot.to} (${slot.label})`);
+      // For Minijobler: skip this day if adding it would exceed their hour limit
+      if (emp.employmentType === 'Minijobler' &&
+          emp.assignedHours + duration > emp.maxHours) {
         continue;
       }
 
-      const chosen = candidates[0];
-      chosen.assignedHours += duration;
-      chosen.assignedDays.add(day);
-      if (!slot.doubleRequired) {
-        assignedToday.add(chosen.id);
-      }
-
+      emp.assignedHours += duration;
       plan[day].push({
-        label: slot.label,
-        from: slot.from,
-        to: slot.to,
-        name: chosen.name,
-        employeeId: chosen.id,
-        employmentType: chosen.employmentType,
-        unassigned: false,
-        doubleRequired: slot.doubleRequired || false
+        from: avail.from,
+        to: avail.to,
+        name: emp.name,
+        employeeId: emp.id,
+        employmentType: emp.employmentType
       });
     }
 
-    // Validate double-staffing for Mo/Mi/Do
+    // Check full-day coverage
+    const gaps = findCoverageGaps(plan[day], coverStart, coverEnd);
+    if (gaps.length > 0) {
+      // Group consecutive gaps into ranges for a readable message
+      const rangeStart = gaps[0];
+      const rangeEnd = minutesToTime(timeToMinutes(gaps[gaps.length - 1]) + 30);
+      conflicts.push(`Lücke in der Abdeckung: ${day} – niemand verfügbar zwischen ${rangeStart} und ${rangeEnd} Uhr`);
+    }
+
+    // Check double staffing Mo/Mi/Do 17:00–20:00
     if (DOUBLE_STAFF_DAYS.has(day)) {
-      const doubleSlot = plan[day].find(s => s.doubleRequired);
-      if (doubleSlot && doubleSlot.unassigned) {
-        // Already recorded as conflict
-      } else if (doubleSlot) {
-        // Check that at least one OTHER person is also covering 17:00-20:00
-        const covering = plan[day].filter(s => {
-          if (s.unassigned) return false;
-          const sFrom = timeToMinutes(s.from);
-          const sTo = timeToMinutes(s.to);
-          return sFrom <= timeToMinutes('17:00') && sTo >= timeToMinutes('20:00');
-        });
-        if (covering.length < 2) {
-          conflicts.push(`Doppelbesetzung nicht erfüllt: ${day} 17:00–20:00 (nur ${covering.length} Person(en) eingeplant)`);
-        }
+      // Find all employees who cover the entire 17–20 window
+      const covering = plan[day].filter(a => {
+        return timeToMinutes(a.from) <= 17 * 60 && timeToMinutes(a.to) >= 20 * 60;
+      });
+      if (covering.length < 2) {
+        conflicts.push(
+          `Doppelbesetzung nicht erfüllt: ${day} 17:00–20:00 ` +
+          `(${covering.length} von 2 benötigten Personen verfügbar)`
+        );
       }
     }
   }
 
-  // Check weekly hours for each employee
+  // Warn if a Minijobler got fewer hours than desired
   for (const emp of employees) {
-    if (emp.employmentType === 'Vollzeit' && emp.assignedHours < 30) {
-      conflicts.push(`${emp.name} (Vollzeit) hat nur ${emp.assignedHours}h/Woche zugeteilt bekommen`);
-    }
-    if (emp.employmentType === 'Teilzeit' && emp.assignedHours < 15) {
-      conflicts.push(`${emp.name} (Teilzeit) hat nur ${emp.assignedHours}h/Woche zugeteilt bekommen`);
-    }
-    if (emp.strictHours && emp.assignedHours > emp.maxHours) {
-      conflicts.push(`${emp.name} (Minijobler) überschreitet gewünschte Stunden: ${emp.assignedHours}h > ${emp.maxHours}h`);
+    if (emp.employmentType === 'Minijobler' &&
+        emp.assignedHours < emp.maxHours) {
+      conflicts.push(
+        `${emp.name} (Minijobler): ${emp.assignedHours}h eingeplant, ` +
+        `gewünscht ${emp.maxHours}h – nicht genug Verfügbarkeit angegeben`
+      );
     }
   }
 
