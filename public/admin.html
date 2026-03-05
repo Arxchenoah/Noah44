@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dienstplan – Admin</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<header class="header">
+  <span class="header__icon">🔧</span>
+  <h1>Dienstplan Admin</h1>
+  <div style="margin-left:auto;">
+    <button class="btn btn--outline btn--sm hidden" id="logoutBtn"
+            style="background:rgba(255,255,255,.15); color:white; border-color:rgba(255,255,255,.3);">
+      Abmelden
+    </button>
+  </div>
+</header>
+
+<!-- ── Login Panel ─────────────────────────────────────────────────────────── -->
+<div class="container" id="loginPanel">
+  <div class="card" style="max-width:400px; margin:3rem auto;">
+    <div class="card__title">🔒 Admin-Anmeldung</div>
+    <div id="loginError" class="alert alert--error hidden"></div>
+    <form id="loginForm" novalidate>
+      <div class="form-group">
+        <label for="adminPassword">Passwort</label>
+        <input type="password" id="adminPassword" placeholder="Admin-Passwort" required />
+      </div>
+      <button type="submit" class="btn btn--primary" id="loginBtn">Anmelden</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Dashboard Panel ─────────────────────────────────────────────────────── -->
+<div class="container--wide hidden" id="dashboardPanel">
+
+  <!-- Progress -->
+  <div class="card">
+    <div class="card__title">📊 Fortschritt</div>
+    <div id="adminProgressText" class="progress-label">Wird geladen…</div>
+    <div class="progress-wrap" style="margin: .5rem 0;">
+      <div class="progress-bar" id="adminProgressBar" style="width:0%"></div>
+    </div>
+    <div style="margin-top:1rem; display:flex; gap:.75rem; flex-wrap:wrap;">
+      <button class="btn btn--success" id="generateBtn">⚡ Dienstplan generieren</button>
+      <button class="btn btn--outline btn--sm" id="refreshBtn">🔄 Aktualisieren</button>
+      <button class="btn btn--danger btn--sm" id="resetBtn" style="margin-left:auto;">
+        🗑️ Alles zurücksetzen
+      </button>
+    </div>
+  </div>
+
+  <!-- Submissions list -->
+  <div class="card">
+    <div class="card__title">👥 Eingereichte Verfügbarkeiten
+      <span id="submissionCount"
+            style="font-size:.85rem; font-weight:400; color:var(--text-muted);"></span>
+    </div>
+    <div id="submissionsList">
+      <p style="color:var(--text-muted); font-size:.875rem;">Noch keine Einreichungen.</p>
+    </div>
+  </div>
+
+  <!-- Shift plan -->
+  <div class="card hidden" id="shiftPlanCard">
+    <div class="card__title">📅 Generierter Dienstplan
+      <span id="planGeneratedAt"
+            style="font-size:.8rem; font-weight:400; color:var(--text-muted);"></span>
+    </div>
+
+    <!-- Conflicts -->
+    <div id="conflictsBox" class="alert alert--warning hidden" style="margin-bottom:1rem;"></div>
+
+    <!-- Calendar -->
+    <div class="calendar-wrap" id="calendarWrap"></div>
+
+    <!-- Summary -->
+    <div style="margin-top:1.25rem;">
+      <div class="card__title" style="margin-top:1rem;">📋 Stunden-Übersicht</div>
+      <div style="overflow-x:auto;">
+        <table class="summary-table" id="summaryTable">
+          <thead>
+            <tr>
+              <th>Mitarbeiter</th>
+              <th>Typ</th>
+              <th>Zugeteilte Stunden</th>
+              <th>Ziel</th>
+            </tr>
+          </thead>
+          <tbody id="summaryBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="card">
+    <div class="card__title">🎨 Legende</div>
+    <div style="display:flex; gap:1rem; flex-wrap:wrap; font-size:.85rem;">
+      <div><span class="shift-block shift-block--vollzeit" style="display:inline-block; padding:.15rem .4rem; border-radius:4px;">Vollzeit</span></div>
+      <div><span class="shift-block shift-block--teilzeit" style="display:inline-block; padding:.15rem .4rem; border-radius:4px;">Teilzeit</span></div>
+      <div><span class="shift-block shift-block--minijobler" style="display:inline-block; padding:.15rem .4rem; border-radius:4px;">Minijobler</span></div>
+      <div><span class="shift-block shift-block--unassigned" style="display:inline-block; padding:.15rem .4rem; border-radius:4px;">Nicht besetzt</span></div>
+      <div><span class="shift-block shift-block--double" style="display:inline-block; padding:.15rem .4rem; border-radius:4px;">Doppelbesetzung (17–20 Uhr)</span></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="/js/calendar.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>

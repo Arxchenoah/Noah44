@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dienstplan – Verfügbarkeit einreichen</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<header class="header">
+  <span class="header__icon">📅</span>
+  <h1>Dienstplan Ersteller</h1>
+</header>
+
+<main class="container">
+
+  <!-- Progress indicator -->
+  <div class="card" id="progressCard">
+    <div class="card__title">📊 Fortschritt</div>
+    <div id="progressText" class="progress-label">Wird geladen…</div>
+    <div class="progress-wrap">
+      <div class="progress-bar" id="progressBar" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Already-complete message -->
+  <div class="alert alert--success hidden" id="allDoneMsg">
+    ✅ Alle Mitarbeiter haben ihre Verfügbarkeit eingetragen. Der Dienstplan wird automatisch erstellt. Vielen Dank!
+  </div>
+
+  <!-- Already submitted (duplicate) -->
+  <div class="alert alert--info hidden" id="alreadySubmittedMsg">
+    ℹ️ Du hast bereits eine Einreichung abgegeben. Falls du Änderungen benötigst, wende dich bitte an den Admin.
+  </div>
+
+  <!-- Form card -->
+  <div class="card" id="formCard">
+    <div class="card__title">✏️ Verfügbarkeit einreichen</div>
+
+    <div id="formError" class="alert alert--error hidden"></div>
+
+    <form id="availabilityForm" novalidate>
+
+      <!-- Name -->
+      <div class="form-group">
+        <label for="empName">Ihr Name *</label>
+        <input type="text" id="empName" name="name" placeholder="Vor- und Nachname" required />
+      </div>
+
+      <!-- Employment type -->
+      <div class="form-group">
+        <label>Beschäftigungsart *</label>
+        <div class="radio-group">
+          <label class="radio-option">
+            <input type="radio" name="employmentType" value="Vollzeit" required />
+            Vollzeit
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="employmentType" value="Teilzeit" />
+            Teilzeit
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="employmentType" value="Minijobler" />
+            Minijobler
+          </label>
+        </div>
+      </div>
+
+      <!-- Minijobler-specific fields -->
+      <div id="minijobFields" class="hidden">
+        <div class="form-group">
+          <label for="desiredHours">Gewünschte Stunden pro Woche *</label>
+          <input type="number" id="desiredHours" name="desiredHoursPerWeek"
+                 min="1" max="40" placeholder="z.B. 10" style="max-width:180px" />
+        </div>
+        <div class="alert alert--info" style="margin-bottom:1rem; font-size:.85rem;">
+          ℹ️ Als Minijobler werden die angegebenen Tage/Uhrzeiten als <strong>feste Verfügbarkeit</strong> behandelt.
+        </div>
+      </div>
+
+      <!-- Availability table -->
+      <div class="form-group">
+        <label>Verfügbarkeit pro Tag *</label>
+        <p style="font-size:.85rem; color:var(--text-muted); margin-bottom:.6rem;">
+          Wählen Sie die Tage aus, an denen Sie arbeiten können, und geben Sie die Uhrzeiten an.
+        </p>
+        <div style="overflow-x:auto;">
+          <table class="avail-table" id="availTable">
+            <thead>
+              <tr>
+                <th>Tag</th>
+                <th>Verfügbar</th>
+                <th>Von</th>
+                <th>Bis</th>
+              </tr>
+            </thead>
+            <tbody id="availBody">
+              <!-- filled by form.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn--primary" id="submitBtn">
+        ✅ Verfügbarkeit einreichen
+      </button>
+    </form>
+  </div>
+
+  <!-- Success message -->
+  <div class="card hidden" id="successCard">
+    <div style="text-align:center; padding:1rem 0;">
+      <div style="font-size:3rem; margin-bottom:.75rem;">🎉</div>
+      <h2 style="margin-bottom:.5rem;">Vielen Dank!</h2>
+      <p style="color:var(--text-muted);" id="successText"></p>
+    </div>
+  </div>
+
+</main>
+
+<script src="/js/form.js"></script>
+</body>
+</html>

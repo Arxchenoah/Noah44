@@ -1,0 +1,4 @@
+node_modules/
+.env
+data/submissions.json
+data/shift-plan.json
